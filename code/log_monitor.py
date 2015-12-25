@@ -34,7 +34,7 @@ class logMonitor():
 		self.conf.read(self.config_path)
 		self.email_list = []
 		self.log_name = ''
-	
+
 
 	def task_portal(self):
 		section_list = self.conf.sections()
@@ -95,19 +95,23 @@ class logMonitor():
 
 	def target_words_monitor(self,monitor_words_list):
 	
+		#get scanning and processing settings and cached data of last scanning
 		target_file_name, start_line_number = self.get_target_file_path('target_words_monitor')
 
 		print target_file_name
 		print start_line_number
 
-		cmd_total = 'wc -l ' + target_file_name + ' | awk \'{print $1}\''
-		total = int(os.popen(cmd_total).read())
-		last_total = start_line_number
+		#beginning scanning file content
+		end_line_number = self.process_target_words_by_settings('target_words_monitor', target_file_name, start_line_number)
+		
+		#update config
+		self.set_conf_value_dynamic("target_words_monitor",'lines',end_line_number)
+		self.set_conf_value_dynamic("target_words_monitor",'last_file',target_file_name)
 
-		delta = int(total - last_total)
-		cmd_file_content = 'tail -' + str(delta) + ' '  + target_file_name
-		file_content = os.popen(cmd_file_content).read()
+	def process_target_words_by_settings(self, monitor_item ,target_file_name, start_line_number):
 
+		file_content, end_line_number= self.get_incremental_filecontent(target_file_name, start_line_number)
+		monitor_words_list = self.conf.get(monitor_item,'target_words').split(',')
 		print monitor_words_list
 		for word in monitor_words_list:
 			pattern = re.compile(word)
@@ -120,14 +124,13 @@ class logMonitor():
 
 				log_content = file_content[start_pos:end_pos]
 				print log_content
-				email_subject = self.conf.get('target_words_monitor','email_subject')
-				email_content = self.conf.get('target_words_monitor','email_content') + '  '+ ' 个数为：' + size+'\n' +log_content 				
+				email_subject = self.conf.get(monitor_item,'email_subject')
+				email_content = self.conf.get(monitor_item,'email_content') + '  '+ ' 个数为：' + size+'\n' +log_content 				
 				thisword_email_content = '[' + word + ']' + email_content
 				thisword_email_subject = '[' + word + ']' + email_subject
 				self.alert_emails(thisword_email_subject,thisword_email_content)
 
-		self.set_conf_value_dynamic("target_words_monitor",'lines',total)
-		self.set_conf_value_dynamic("target_words_monitor",'last_file',target_file_name)
+		return end_line_number
 
 	def error_words_monitor(self, monitor_words_list, threshold):
 
@@ -135,7 +138,8 @@ class logMonitor():
 
 		print target_file_name
 		print start_line_number
-						
+
+		#get scanning and processing settings and cached data of last scanning
 		error_words_count_last_time_str_list = self.conf.get('error_words_monitor','static_number').split(',')
 		
 		words_count_last_time_list = []
@@ -145,6 +149,8 @@ class logMonitor():
 		print words_count_last_time_list
 		print words_count_thresholds		
 
+		
+		#beginning scanning file content
 		end_line_number = self.process_error_words_by_settings('error_words_monitor', target_file_name, start_line_number, words_count_last_time_list, words_count_thresholds)
 		print words_count_last_time_list
 
@@ -279,7 +285,7 @@ class logMonitor():
 		self.insert_db(selected_lines)
 
 	def insert_db(self, doc_lines):
-		es_uri = "http://localhost:9200/index_name/type_name"
+		es_uri = "http://localhost:9200/es_index/es_index"
 		for doc_line in doc_lines:
 			print doc_line			
 			record_doc = json.loads(doc_line)
