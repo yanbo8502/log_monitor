@@ -34,7 +34,7 @@ class logMonitor():
 		self.conf.read(self.config_path)
 		self.email_list = []
 		self.log_name = ''
-
+	
 
 	def task_portal(self):
 		section_list = self.conf.sections()
