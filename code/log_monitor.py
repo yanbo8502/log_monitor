@@ -54,7 +54,15 @@ class logMonitor():
 				if self.conf.get(item,'enable') != 'false':
 					monitor_list.append(item)
 		for monitor_item in monitor_list:
-			self.worker(monitor_item)
+			try:
+				self.worker(monitor_item)
+				#raise Exception('test')
+			except Exception,e:
+				print str(e)
+				error_message = monitor_item + 'catch exception: ' + str(e)
+				print error_message
+				self.record_error_message(error_message)
+
 
 	def worker(self,monitor_item):
 	
@@ -261,31 +269,41 @@ class logMonitor():
 		line_index = 0
 		selected_lines = []
 		curfile = open(filepath)
-		print "finding %s..." %(curfile)
-		for line in curfile.readlines():
-			line_index = line_index+1
-			if line_index <= start_line_number:
-				continue
 
-			if keyword in line:
-				npos = line.find(keyword)
-				if npos > 0:
-					start_pos = line.find("{", npos)
-					end_pos = line.rfind("}")
-					if start_pos > 0 and end_pos > start_pos:
-						record = line[start_pos : end_pos +1]						
-						selected_lines.append(record)
-						
+		try:
+			print "finding %s..." %(curfile)
+			for line in curfile.readlines():
+				line_index = line_index+1
+				if line_index <= start_line_number:
+					continue
 
-		print "process " + filepath + " end in line " + str(line_index)
-		self.set_conf_value_dynamic("user_request_monitor",'lines',line_index)
-		self.set_conf_value_dynamic("user_request_monitor",'last_file',filepath)
-		curfile.close()
+				if keyword in line:
+					npos = line.find(keyword)
+					if npos > 0:
+						start_pos = line.find("{", npos)
+						end_pos = line.rfind("}")
+						if start_pos > 0 and end_pos > start_pos:
+							record = line[start_pos : end_pos +1]						
+							selected_lines.append(record)
+							
 
+			print "process " + filepath + " end in line " + str(line_index)
+			self.set_conf_value_dynamic("user_request_monitor",'lines',line_index)
+			self.set_conf_value_dynamic("user_request_monitor",'last_file',filepath)
+			curfile.close()
+
+		except Exception,ex:
+			print Exception,":",ex
+			self.record_error_message('ReadTargetRecordInFile catch exception: ' + str(ex))
+			
+		finally:
+			curfile.close()
+
+		
 		self.insert_db(selected_lines)
 
 	def insert_db(self, doc_lines):
-		es_uri = "http://localhost:9200/es_index/es_index"
+		es_uri = "http://localhost:9200/es_index/es_type"
 		for doc_line in doc_lines:
 			print doc_line			
 			record_doc = json.loads(doc_line)
@@ -365,9 +383,30 @@ class logMonitor():
 		monitor_str = monitor_str[1:]
 		email_content = urllib.quote(check_time + email_content)
 		email_subject = urllib.quote(email_subject)
-		cmd_email = 'http://http_mail_server/?receivers='+monitor_str+'&subject='+email_subject+'&content=' + email_content 
+		cmd_email = 'http://http_mail_server/mailer/send/?receivers='+monitor_str+'&subject='+email_subject+'&content=' + email_content 
 		self.send_curl_command(cmd_email)
-	 
+
+	def record_error_message(self, error_message):
+
+		today = datetime.datetime.today()
+		try:
+			log_prefix = 'monitor_error_log'
+			date = today.strftime("%Y-%m-%d")
+			filepath = self.cur_file_dir() + '/' + log_prefix + '_' + date + '.log'
+			cmd = "echo " + error_message + " >> " + filepath
+			os.popen(cmd)
+		except Exception,e:
+			print str(e)
+
+	def cur_file_dir(self):
+		#获取脚本路径
+		path = sys.path[0]
+		#判断为脚本文件还是py2exe编译后的文件，如果是脚本文件，则返回的是脚本的目录，如果是py2exe编译后的文件，则返回的是编译后的文件路径
+		if os.path.isdir(path):
+			return path
+		elif os.path.isfile(path):
+			return os.path.dirname(path)
+
 
 if __name__ == '__main__':
 	logMonitor.config_path=sys.argv[1]
