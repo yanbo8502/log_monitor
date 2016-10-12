@@ -21,29 +21,34 @@ target_words =  [keyword1,keyword2,... , eg] comma-delimited value to set the mo
 email_subject = [目标词监控报警, eg] A brief title trunck-content specially for this monitor, to inform receiver the severity category, the program will add some other information to it, for example, the monitorer server host.
 
 email_content = [目标词日志出现 部分日志内容已经截取，如下所示，请进行处理, eg]
-enable = [true, fasle] if set false, thie monitor will not be implemented
+enable = [true, fasle] if set false, thismonitor will not be implemented
 
 [user_request_monitor]
 target_words = [target log line keyword]
-log_paras = {'prefix':0,'reqStartTime':1,'reqStartTimeStr':2, 'direct_client_host': 3 , 'direct_client_port':4 , 'real_client_host':5 , 'server_mark' :6 , 'request_uri' : 7, 'uid' : 8, 'devide_id' : 9, 'device_type' : 10 , 'response_time':11}
-log_paras_type = {'prefix':'string','reqStartTime':'datetime','reqStartTimeStr':'string', 'direct_client_host': 'string' , 'direct_client_port':'int' , 'real_client_host':'string' , 'server_mark' :'string' , 'request_uri' : 'string', 'uid' :'string', 'devide_id' : 'string', 'device_type' : 'string' , 'response_time':'int'}
+log_paras = {'prefix':0,'reqStartTime':1,'reqStartTimeStr':2, 'direct_client_host': 3 , 'direct_client_port':4 , 'real_client_host':5 , 'server_mark' :6 , 'request_uri' : 7, 'uid' : 8, 'devide_id' : 9, 'device_type' : 10 , 'response_time':11}, eg. json-format setting, each key represents one property in "user request reocord line " in the log. the value-number of each key means the position(column) index of the property in comma-splitted format line of user request in CSV log type.
+log_paras_type = {'prefix':'string','reqStartTime':'datetime','reqStartTimeStr':'string', 'direct_client_host': 'string' , 'direct_client_port':'int' , 'real_client_host':'string' , 'server_mark' :'string' , 'request_uri' : 'string', 'uid' :'string', 'devide_id' : 'string', 'device_type' : 'string' , 'response_time':'int'}, eg. json-format setting, each key represents one property in "user request reocord line " in the log. the data-format-value of each key means the value-format of the property in comma-splitted format line of user request in CSV log type.  This can help parsing the properties. 
 timestamp_unit = s
-enable = false
+enable = [true, fasle] if set false, thismonitor will not be implemented
 
 [overtime_monitor]
 request_time_unit = [s or ms, use to decide how to convert the digit of timestamp to seconds]
-request_time_index = [2, eg. the position index of the different information in CSV-format log line]
-request_time_key = [reqStartTimeStr, eg, key-name of request timestamp in json-format log line]
-time_format = %Y-%m-%d %H:%M:%S
-time_cost_index = 11
-time_cost_key = response_time
-time_cost_unit = ms
-monitor_word = [audience_service::user2audience][JSON]
-threshold = 5
-time_threshold = 2
-start_time = 1475213564
-stats_interval = 30
-count = 0
+request_time_index = [2, eg. the position index of the timestamp information of user request in CSV-format log line]
+request_time_key = [reqStartTimeStr, eg, key-name of request timestamp in json-format 
+log line]
+time_format = [date-time format like '%Y-%m-%d %H:%M:%S', or 'number', eg] date-time-format, widely used by timestamp-string convertion in many languages like C++, java, python. This is used to convert the string format like '2016-10-12 14:21:16' to number 1476253276 with unit of 'seconds'. if this setting value is set to 'number', the timestamp in log line is already time number like 1476253276 and no convertion is needed.
+time_cost_index =  [11, eg. the position index of the properyt of response-time (the time-cost which server takes to process the user request and get the return value) in CSV-format log line]
+time_cost_key = [response_time, eg], used for json log-type,to indentify which key in json mean the time-cost property
+time_cost_unit = [s or ms, use to decide how to convert the number of time-cost to milliseconds]
+monitor_word = [keyword to extract the line of the user-request information among other log information lines]
+count_threshold = [1000, eg] If the over-time user requests exceeds this number limit within a time-window, altert will be triggered
+time_threshold = [300, eg, in unit of seconds] if the time-cost to process  one user-request exceed the time limit, the over-time count will increased by one.
+start_time = [1475213564, eg] The start time-stamp number of one time-window
+stats_interval = [300, eg, in unit of seconds] stats_inrterval is the time window of the monitor to do the statistics, within one time-window, the monitor may process and count the log files increasingly more than one time.
+count = [0, eg] The current accumulated over-time counts in the time-window.
 email_subject = 超时过多报警
 email_content = 在指定时间内，超时请求过多，服务器的性能存在异常，请处理（考虑切换备份）。
-enable = true
+enable = [true, fasle] if set false, thismonitor will not be implemented
+
+
+#log_stats_for_time
+
