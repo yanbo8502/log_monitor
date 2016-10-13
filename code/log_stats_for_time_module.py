@@ -31,9 +31,9 @@ class logStat():
     filter_words = []
     overtime_threshold = 1000
     _time_pattern = ""
-    _nginx_log_rex_str = ""
-    _nginx_timecost_index = 0
-    _nginx_date_index = 0
+    _regx_log_rex_str = ""
+    _regx_timecost_index = 0
+    _regx_date_index = 0
     _ratio_stats = []
     stats_ratios = [0.5, 0.9, 0.95, 0.99, 0.999, 0.9999, 1.0]
     _total_log_start_time = 0l
@@ -57,10 +57,10 @@ class logStat():
         if ''!=time_cost_unit:
             self._time_cost_unit = time_cost_unit
 
-    def SetNginxLogSettings(self,  nginx_log_rex_str, nginx_timecost_index, nginx_date_index):
-        self._nginx_log_rex_str = nginx_log_rex_str
-        self._nginx_timecost_index = nginx_timecost_index
-        self._nginx_date_index = nginx_date_index
+    def SetRegxLogSettings(self,  regx_log_rex_str, regx_timecost_index, regx_date_index):
+        self._regx_log_rex_str = regx_log_rex_str
+        self._regx_timecost_index = regx_timecost_index
+        self._regx_date_index = regx_date_index
 
     def SetCSVLogSettings(self, time_start_index, time_cost_index):
         self._comma_log_response_time_cost_index = time_cost_index
@@ -114,8 +114,8 @@ class logStat():
     def ExtractDateTimeFromLog(self, line):
         if 'custom' == self._log_mode:
             return self.ExtractDateTimeFromCustomLog(line)
-        if 'nginx' == self._log_mode:
-            return self.ExtractDateTimeFromNginxLog(line)
+        if 'regx' == self._log_mode:
+            return self.ExtractDateTimeFromRegxLog(line)
         if 'json'  ==  self._log_mode:
             return self.ExtractDateTimeFromJsonLog(line)
         if 'csv'  ==  self._log_mode:
@@ -141,12 +141,12 @@ class logStat():
             
         return time_value
 
-    def ExtractDateTimeFromNginxLog(self, line):
+    def ExtractDateTimeFromRegxLog(self, line):
         time_value = 0l
         try:
-            p = re.compile(self._nginx_log_rex_str)
+            p = re.compile(self._regx_log_rex_str)
             print p.match(line).groups()
-            request_date_str = p.match(line).group(self._nginx_date_index)
+            request_date_str = p.match(line).group(self._regx_date_index)
             print request_date_str
             #'29/Jul/2016:16:01:15
             time_value = time.mktime(time.strptime(request_date_str,'%d/%b/%Y:%H:%M:%S'))
@@ -197,16 +197,16 @@ class logStat():
 
         return request_time
 
-    def parseLineForPerformanceInNginxFormat(self, line, keyword):
+    def parseLineForPerformanceInRegxFormat(self, line, keyword):
         #performance line format is  xxxx keyword: 123ms xxxxx
         target_time = -1
 
         if keyword in line:
 
-            p = re.compile(self._nginx_log_rex_str)
+            p = re.compile(self._regx_log_rex_str)
             line = line.strip("\n")
             try:
-                request_timecost_str = p.match(line).group(self._nginx_timecost_index)
+                request_timecost_str = p.match(line).group(self._regx_timecost_index)
             except Exception as e:
                 print line
                 raise e
@@ -262,10 +262,9 @@ class logStat():
         return True
 
     def GrepFromTxtInFile(self, filepath, keyword):
-        return self.GrepFromTxtInFileByRange(filepath, keyword, 1)
-        
+        return self.GrepFromTxtInFileByRange(filepath, keyword, 1, -1)
 
-    def GrepFromTxtInFileByRange(self, filepath, keyword, start_line):
+    def GrepFromTxtInFileByRange(self, filepath, keyword, start_line, end_line):
         first_query = ""
 
         curfile = open(filepath)
@@ -275,6 +274,9 @@ class logStat():
         for line in lines:
 
             line_index = line_index + 1
+
+            if line_index == end_line + 1 and end_line > 0:
+                break
 
             if line_index < start_line:
                 continue
@@ -293,8 +295,8 @@ class logStat():
                 extracted_time = self.parseLineForPerformanceInCustomFormat(line, keyword)
             elif 'json' == self._log_mode:
                 extracted_time = self.parseLineForPerformanceInJsonFormat(line, keyword)
-            elif 'nginx' == self._log_mode:
-                extracted_time = self.parseLineForPerformanceInNginxFormat(line, keyword)
+            elif 'regx' == self._log_mode:
+                extracted_time = self.parseLineForPerformanceInRegxFormat(line, keyword)
             elif 'csv' == self._log_mode:
                 extracted_time = self.parseLineFroPerformanceInCSVFormat(line)
 

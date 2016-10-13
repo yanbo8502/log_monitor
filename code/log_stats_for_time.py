@@ -21,12 +21,12 @@ def PrintHelp():
     print "-h for help"
     print "-f <target file path>"
     print "-r/--directory= <target folder path>"
-    print "-t/--log_type= <log type> \'custom\' , \'json\',\'nginx\',\'csv\', \'custom\' is for user customized-development support"
+    print "-t/--log_type= <log type> \'custom\' , \'json\',\'regx\',\'csv\', \'custom\' is for user customized-development support"
     print "-k/--keyword= <line filter keyword>, only lines containning this keyword will be involved"
     print "--time_threshold= <over time threhold>"
     print "--pattern= <file name fiter pattern>, keyword or postfix in log file name "
     print "--time_pattern= <log time-stamp fiter pattern>, use given time-stamp string segement like \'2016-09:01 21:15\'  to filter log within certain minute/hour/day "
-    print "--log_conf= <log config file path>,  for nginx-format, or some csv-format logs, some settings is not convenient to input by command line"
+    print "--log_conf= <log config file path>,  for complicated-format requiring regx to parse, or some csv-format logs, some settings is not convenient to input by command line"
     print "--time_format= <date time format, for time parsing>, default is %Y-%m-%d %H:%M:%S, use \'number\' for decimal timestamp like 14569793275"
     print "--time_cost_unit= <unit for response time number>, \'ms\' or \'s\' default is \'ms\' "
     print "--record_time_unit= <unit for log time stamp>, \'ms\' or \'s\' default is \'s\', python time methon default is \'s\' "
@@ -161,11 +161,6 @@ if __name__=="__main__":
         try:
             log_rex_str = conf.get("basic",'log_regx')
         except Exception,e:
-                print str(e) 
-
-        try:
-            log_paras = conf.get("basic",'log_paras').split(',')
-        except Exception,e:
                 print str(e)      
         
         try:
@@ -189,13 +184,13 @@ if __name__=="__main__":
                 print str(e) 
 
 
-    if log_type == "nginx":
+    if log_type == "regx":
         if log_conf_path == "":
-            print 'ngix format need log config'
+            print 'regx format need log config'
             PrintHelp()
             exit(1)
             
-        log_stat.SetNginxLogSettings(log_rex_str, time_cost_index, request_time_index)
+        log_stat.SetRegxLogSettings(log_rex_str, time_cost_index, request_time_index)
         print "log_rex_str " + log_rex_str
 
     if log_type == "csv":

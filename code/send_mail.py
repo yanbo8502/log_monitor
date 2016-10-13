@@ -12,10 +12,13 @@ import socket
 
 class sendMail():
 	_mail_adresses = ''
+	_http_api = 'http://xxxx.xxxxx.xxxx/mail.php'
 
 	def __init__(self, mail_adresses):
 		self._mail_adresses = mail_adresses
 
+	def set_server(self, server_api):
+		self._http_api = server_api
 
 	def send_curl_command(self,url):
 		print url
@@ -23,7 +26,7 @@ class sendMail():
 		c.setopt(c.URL, url)
 		b = StringIO.StringIO()
 		c.setopt(pycurl.WRITEFUNCTION,b.write)
-		c.perform()
+		#c.perform()
 		c.close
 
 	def alert_emails(self,email_subject,email_content):
@@ -32,11 +35,11 @@ class sendMail():
 		ip = self.get_host()
 		email_subject = ip + "-" + email_subject
 		email_content =check_time + email_content
-		http_api = 'http://xxxx.xxxxx.xxxx/mail.php?'
+ 
 		request_uri = 'sendto='+ self._mail_adresses +'&subject='+email_subject+'&body=' + email_content
 		request_uri_encode = 'sendto='+ urllib.quote(self._mail_adresses.encode('utf-8'))+'&subject='+ urllib.quote(email_subject.encode('utf-8'))+'&body=' + urllib.quote(email_content.encode('utf-8')) 
-		cmd_email = http_api + request_uri
-		cmd_email_encode = http_api + request_uri_encode
+		cmd_email = self._http_api + '?' + request_uri
+		cmd_email_encode = self._http_api + '?' + request_uri_encode
 		
 		self.send_curl_command(cmd_email_encode)
 
