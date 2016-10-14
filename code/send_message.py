@@ -27,7 +27,7 @@ class sendMessage():
 		c.setopt(c.URL, url)
 		b = StringIO.StringIO()
 		c.setopt(pycurl.WRITEFUNCTION,b.write)
-		#c.perform()
+		c.perform()
 		c.close
 
 	def alert_phone_message(self, content):

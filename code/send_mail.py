@@ -26,7 +26,7 @@ class sendMail():
 		c.setopt(c.URL, url)
 		b = StringIO.StringIO()
 		c.setopt(pycurl.WRITEFUNCTION,b.write)
-		#c.perform()
+		c.perform()
 		c.close
 
 	def alert_emails(self,email_subject,email_content):
