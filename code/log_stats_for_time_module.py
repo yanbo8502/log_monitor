@@ -102,7 +102,12 @@ class logStat():
         total_query_count = len(self.query_time_array)
         self.output_stats_ratio = []
         for count in self.output_stats:
-            self.output_stats_ratio.append(round(count*1.0/total_query_count, 4))
+            ratio = 0.0
+            if total_query_count > 0:
+                ratio = round(count*1.0/total_query_count, 4)
+
+            self.output_stats_ratio.append(ratio)
+
         return self.output_stats_ratio
 
     def GetAllQueryTimes(self):
@@ -123,6 +128,7 @@ class logStat():
         # todo support json log
 
     def ExtractDateTimeFromCustomLog(self, line):
+        print "ExtractDateTimeFromCustomLog"
         time_value = 0l
         try:
             time_str = ""
@@ -130,6 +136,7 @@ class logStat():
             end_pos = line.find("]")
             if start_pos >= 0 and end_pos > start_pos:
                 time_str = line[start_pos + 1 : end_pos]
+
             print time_str 
             #python time is in unit second
             time_value = time.mktime(time.strptime(time_str,self._timestamp_format))
@@ -138,27 +145,38 @@ class logStat():
    
             #raise ex 
         #finally:
-            
+
         return time_value
 
     def ExtractDateTimeFromRegxLog(self, line):
+        print "ExtractDateTimeFromRegxLog"
+        time_rate = 1
+        if 'ms' == self._record_time_unit:
+            time_rate = 1000
+
         time_value = 0l
         try:
             p = re.compile(self._regx_log_rex_str)
-            print p.match(line).groups()
-            request_date_str = p.match(line).group(self._regx_date_index)
+            reg_mathch_items = p.match(line).groups()
+            request_date_str = reg_mathch_items[self._regx_date_index]
             print request_date_str
-            #'29/Jul/2016:16:01:15
-            time_value = time.mktime(time.strptime(request_date_str,'%d/%b/%Y:%H:%M:%S'))
-            print time_value
+       
+            if "number" == self._timestamp_format:
+                time_value = int(request_date_str)/time_rate
+            
+            else:
+                time_value = time.mktime(time.strptime(request_date_str, self._timestamp_format))
+
         except Exception,ex:
             print Exception,":",ex
             #raise ex 
         #finally:
-            
+         
         return time_value
 
     def ExtractDateTimeFromCSVLog(self, line):
+        print "ExtractDateTimeFromCSVLog"
+
         time_rate = 1
         if 'ms' == self._record_time_unit:
             time_rate = 1000
@@ -167,11 +185,11 @@ class logStat():
         request_time = 0
         print self._timestamp_format
         print response_results
-        print "ExtractDateTimeFromCSVLog"
+        
+        request_date_str = response_results[self._comma_log_request_time_index]
         if "number" == self._timestamp_format:
-            request_time = int(response_results[self._comma_log_request_time_index])/time_rate
+            request_time = int(request_date_str)/time_rate
         else:
-            request_date_str = response_results[self._comma_log_request_time_index]
             request_time = time.mktime(time.strptime(request_date_str, self._timestamp_format))
         return request_time
 
@@ -188,17 +206,20 @@ class logStat():
             record = line[start_pos : end_pos +1]                       
             record_doc = json.loads(record)
             if self._json_request_time_key in record_doc.keys():
+                request_time_str = record_doc[self._json_request_time_key]
                 if "number" == self._timestamp_format:
-                    request_time = int(record_doc[self._json_request_time_key])/time_rate
+                    request_time = int(request_time_str)/time_rate
                 else:
-                    request_date_str = record_doc[self._json_request_time_key]
-                    request_time = time.mktime(time.strptime(request_date_str, self._timestamp_format))
-
+                    request_time = time.mktime(time.strptime(request_time_str, self._timestamp_format))
 
         return request_time
 
     def parseLineForPerformanceInRegxFormat(self, line, keyword):
-        #performance line format is  xxxx keyword: 123ms xxxxx
+        
+        time_rate = 1000
+        if 'ms' == self._time_cost_unit:
+            time_rate = 1
+
         target_time = -1
 
         if keyword in line:
@@ -206,12 +227,13 @@ class logStat():
             p = re.compile(self._regx_log_rex_str)
             line = line.strip("\n")
             try:
-                request_timecost_str = p.match(line).group(self._regx_timecost_index)
+                reg_mathch_items = p.match(line).groups()
+                request_timecost_str = reg_mathch_items[self._regx_timecost_index]
             except Exception as e:
                 print line
                 raise e
             #original unit is seconds
-            target_time = float(request_timecost_str)*1000
+            target_time = float(request_timecost_str)*time_rate
 
         return target_time
 
@@ -248,11 +270,15 @@ class logStat():
 
 
     def parseLineFroPerformanceInCSVFormat(self, line):
+
+        time_rate = 1000
+        if 'ms' == self._time_cost_unit:
+            time_rate = 1
         time_cost = 0;
         response_results = re.split('[,\n]', line)
 
         if len(response_results) > self._comma_log_response_time_cost_index:
-            time_cost = int(response_results[self._comma_log_response_time_cost_index])
+            time_cost = int(response_results[self._comma_log_response_time_cost_index])*time_rate
         return time_cost
 
     def IsValid(self, line, filter_words):
@@ -266,13 +292,13 @@ class logStat():
 
     def GrepFromTxtInFileByRange(self, filepath, keyword, start_line, end_line):
         first_query = ""
-
+        print self._log_mode
         curfile = open(filepath)
         print "finding %s..." %(curfile)
         lines = curfile.readlines()
         line_index = 0
         for line in lines:
-
+ 
             line_index = line_index + 1
 
             if line_index == end_line + 1 and end_line > 0:
@@ -415,7 +441,10 @@ class logStat():
         print "average time cost per request(ms): " + str(self._avg_time_in_ms_per_request)
         print "std.dev time cost(ms): " + str(self._std_time_in_ms)
         print "total requests: " + str(self.GetRequestCount())
-        print "qps: " + str(self.GetRequestCount()*1.0/(self.GetTotalTimeForAllRequests()))
+        total_time_range = self.GetTotalTimeForAllRequests();
+        if 0.0 == total_time_range :
+            total_time_range = 0.5
+        print "qps: " + str(self.QueryPerSecond())
         print "=========================================="
 
     def PrintFixedRatiosStats(self):
@@ -456,6 +485,7 @@ class logStat():
             index = int(total_query_count*ratio)    
             if index > total_query_count - 1:
                 index =  total_query_count - 1       
+            
             self._ratio_stats.append(self.query_time_array[index])
 
         return self._ratio_stats
@@ -472,7 +502,10 @@ class logStat():
     def QueryPerSecond(self):
         
         totla_request_count = len(self.query_time_array)
-        querry_per_second = round(totla_request_count/self.total_time_range, 1)
+        time_range = self.total_time_range
+        if 0.0 == time_range:
+            time_range = 1.0
+        querry_per_second = round(totla_request_count/time_range, 1)
         
         return querry_per_second
 

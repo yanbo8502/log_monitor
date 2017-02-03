@@ -26,7 +26,7 @@ def PrintHelp():
     print "--time_threshold= <over time threhold>"
     print "--pattern= <file name fiter pattern>, keyword or postfix in log file name "
     print "--time_pattern= <log time-stamp fiter pattern>, use given time-stamp string segement like \'2016-09:01 21:15\'  to filter log within certain minute/hour/day "
-    print "--log_conf= <log config file path>,  for complicated-format requiring regx to parse, or some csv-format logs, some settings is not convenient to input by command line"
+    print "-c/--log_conf= <log config file path>,  for complicated-format requiring regx to parse, or some csv-format logs, some settings is not convenient to input by command line"
     print "--time_format= <date time format, for time parsing>, default is %Y-%m-%d %H:%M:%S, use \'number\' for decimal timestamp like 14569793275"
     print "--time_cost_unit= <unit for response time number>, \'ms\' or \'s\' default is \'ms\' "
     print "--record_time_unit= <unit for log time stamp>, \'ms\' or \'s\' default is \'s\', python time methon default is \'s\' "

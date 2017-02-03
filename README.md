@@ -1,3 +1,15 @@
+usage examples:
+#log stats:
+cd [path of stats script]
+python log_stats_for_time.py -t csv --log_conf=log_stats_for_time.ini -f /data/dist/dmp_http_service_dir/log_performance/audience_http_performance_2016-12-30_00:00:00.log
+
+
+#log monitor:
+*/1 * * * * python /data/dist/scripts/log_monitor.py  -c /data/dist/scripts/audience_monitor_v1_7.ini
+*/1 * * * * python /data/dist/scripts/log_monitor.py  -c /data/dist/scripts/audience_monitor_v1_7_logbackup.ini >> /data/dist/scripts/upload_stats.log
+
+
+
 # log_monitor
 log_monitor configuration/cache file instrustion:
 

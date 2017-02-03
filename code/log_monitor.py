@@ -6,7 +6,7 @@
     @author:   yanbo
     @desc:     log monitor 
     @date:     2015-6-16
-    @lastUpdate yanbo 2016-09-30
+    @lastUpdate yanbo 2017-01-12
 '''
 import sys
 import re
@@ -18,17 +18,14 @@ import pycurl
 import StringIO
 import urllib
 import ConfigParser
-
-import sys
-import random
-import os
-import time,datetime
 import json
 import urllib2 
 import log_stats_for_time_module
-import sys
 import send_mail
 import send_message
+from elasticsearch import Elasticsearch
+from elasticsearch import helpers
+import frequency_control
 
 default_encoding = 'utf-8'
 if sys.getdefaultencoding() != default_encoding:
@@ -43,22 +40,46 @@ class logMonitor():
 	_email_list = []
 	_mail_handler = send_mail.sendMail("")
 	_message_handler = send_message.sendMessage("")
+	_cache_path = ""
+	_start_line_number = 0
+	_end_line_number = 0
+	_target_file_list = []
+	_target_log_db_uri = ""
+	_target_log_db_dbname = ""
+	_target_log_db_tablename = ""
+	_instance_key = "default"
 
-	def __init__(self, config_path, target_log_path):
+	def __init__(self, config_path, cache_path, target_log_path, instance_key):
 		self._config_path = config_path
 		self._target_log_path = target_log_path
-		
+		if '' != instance_key:
+			self._instance_key = instance_key
+
 		self.conf = ConfigParser.ConfigParser()
 		self.conf.read(self._config_path)
 		self.email_list = []
 		self.log_name_prefix = ''
 		self._log_type = self.conf.get('basic','log_type')
 
+		if  '' == cache_path:
+			filebasename = os.path.basename(config_path)
+			self._cache_path =  filebasename + '.' + self._instance_key + ".cache"
+		else:
+			self._cache_path = cache_path
+
+		f = open(self._cache_path, 'a+')
+		f.close()
+
+		self.cache_conf =  ConfigParser.ConfigParser()
+		self.cache_conf.read(self._cache_path)
+
+		self._freq_control = frequency_control.FrequencyControl(self._config_path, "", self._instance_key)
+
+
 	def task_portal(self):
+
 		section_list = self.conf.sections()
 		monitor_list = []
-		
-		result = 0
 
 		for item in section_list:
 			if item == 'basic':
@@ -93,6 +114,22 @@ class logMonitor():
 			else:
 				if self.conf.get(item,'enable') != 'false':
 					monitor_list.append(item)
+
+
+		#get scanning and processing settings and cached data of last scanning
+		self._target_file_list, self._start_line_number = self.get_increased_file_path_list('basic')
+
+		print self._target_file_list
+		print self._start_line_number
+
+		self._end_line_number = 0
+		last_file_path = ""
+		file_count = len(self._target_file_list)
+
+		if file_count >= 1:
+			last_file_path = self._target_file_list[file_count -1]
+			self._end_line_number = self.get_file_length(last_file_path)
+
 		for monitor_item in monitor_list:
 			try:
 				self.worker(monitor_item)
@@ -103,42 +140,33 @@ class logMonitor():
 				print error_message
 				self.record_error_message(error_message)
 
-
-	def worker(self,monitor_item):
-
-		#get scanning and processing settings and cached data of last scanning
-		target_file_list, start_line_number = self.get_increased_file_path_list('basic')
-
-		print target_file_list
-		print start_line_number
-
-		file_count = len(target_file_list)
 		if file_count < 1:
 			return
+		self.set_cache_value_dynamic("basic",'lines', self._end_line_number)
+		self.set_cache_value_dynamic("basic",'last_file',last_file_path) 
 
-		last_file_path = target_file_list[file_count -1]
-
-		end_line_number = self.get_file_length(last_file_path)
-	
+	def worker(self,monitor_item):
+			
 		if monitor_item == 'error_words_monitor':
 			if self.conf.get(monitor_item,'monitor_words') == '':
 				return
 			print 'error_words_monitor start'
-			self.error_words_monitor(target_file_list, start_line_number, end_line_number)
+			self.error_words_monitor(self._target_file_list, self._start_line_number, self._end_line_number)
 		elif monitor_item == 'target_words_monitor':
 			print 'target_words_monitor start'
-			self.target_words_monitor(target_file_list, start_line_number, end_line_number)
+			self.target_words_monitor(self._target_file_list, self._start_line_number, self._end_line_number)
 		elif monitor_item == 'user_request_monitor':
 			print 'user_request_monitor start'
-			self.log_query_record_monitor(target_file_list, start_line_number, end_line_number)
+			self.log_query_record_monitor(self._target_file_list, self._start_line_number, self._end_line_number)
 		elif monitor_item == 'overtime_monitor':
 			print 'overtime_monitor start'
-			self.overtime_monitor(target_file_list, start_line_number, end_line_number)
+			self.overtime_monitor(self._target_file_list, self._start_line_number, self._end_line_number)
+		elif monitor_item == 'error_status_monitor':
+			print 'error_status_monitor start'
+			self.error_status_monitor(self._target_file_list, self._start_line_number, self._end_line_number)
+		
 		else:
 			return
-
-		self.set_conf_value_dynamic("basic",'lines', end_line_number)
-		self.set_conf_value_dynamic("basic",'last_file',last_file_path) 
 
 	def log_name_everyday(self):
 
@@ -168,64 +196,89 @@ class logMonitor():
 
 
 	def error_words_monitor(self, target_file_list, start_line_number, end_line_number):
+		#LOAD CONFIG
+		stats_interval_str = self.conf.get('error_words_monitor','stats_interval');
+		count_thrshold_str = self.conf.get('error_words_monitor','count_threshold');
+		email_subject = self.conf.get('error_words_monitor','email_subject')
+		email_content = self.conf.get('error_words_monitor','email_content')
+		stats_intervals = json.loads(stats_interval_str)
+		count_thresholds = json.loads(count_thrshold_str)
+		monitor_words_list = count_thresholds.keys()
+		monitor_words_list =  self.conf.get('error_words_monitor','monitor_words').split(',');
+	
+		#LOAD CACHE
+		print 'load cache'
+		counts=  {} 
+		start_times =  {}
+		try:
+			count_cache_str = self.cache_conf.get('error_words_monitor','count');
+			counts = json.loads(count_cache_str)
+		except Exception,e:
+			for word in monitor_words_list:
+				counts[word] = 0
+			print str(e)
 
-		word_setting_str = self.conf.get('error_words_monitor','settings');
-		word_settings = json.loads(word_setting_str)
-		monitor_words_list = word_settings.keys()
+		try:
+			start_time_cache_str = self.cache_conf.get('error_words_monitor','start_time');
+			start_times = json.loads(start_time_cache_str)
+		except Exception,e:
+			for word in monitor_words_list:
+				start_times[word] = long(time.time())
+			print str(e)
 		
-		last_file_path= ""
-	
-		if len(target_file_list)!=0:
+		#load finish
+		print 'load finish'
+		
 
-			#get scanning and processing settings and cached data of last scanning
-			words_count_list = []
-			words_count_thresholds = []
-			#beginning scanning file content
-			increased_words_count_list = self.process_error_words_by_settings(target_file_list, monitor_words_list, start_line_number, end_line_number)
-	
-			email_subject = self.conf.get('error_words_monitor','email_subject')
-			email_content = self.conf.get('error_words_monitor','email_content')
-
-			
-			for index in range(0, len(monitor_words_list)):
-				word = monitor_words_list[index]
-				threshold = word_settings[word]['count_threshold']
-				word_count = increased_words_count_list[index] + word_settings[word]['count']
-				word_settings[word]['count'] = word_count
-				start_time = word_settings[word]['start_time']
-				current_time = long(time.time())
-				total_time = current_time - long(start_time)
-				stats_interval = word_settings[word]['stats_interval']
-
-				#update by count
-				if word_count >= int(threshold) and total_time>=stats_interval:
-					
-					start_time_str = time.strftime("%Y-%m-%d_%H:%M:%S", time.localtime(start_time))
-					 
-					thisword_email_content =  email_subject + " " + email_content +  ' [' + word + ']' + ' threshold: ' + str(threshold) +\
-					 ' exact count:' + str(word_count) + ' from ' + start_time_str + " within statistic period " + str(total_time) + " s"
-					thisword_email_subject = email_subject + ' [' + word + ']'
-					
-					self._mail_handler.alert_emails(thisword_email_subject, thisword_email_content);
-					self._message_handler.alert_phone_message(thisword_email_content);
-					#mail is sent, reset status
-					word_settings[word]['count'] = 0	
-
+		#get scanning and processing settings and cached data of last scanning
+		words_count_list = []
+		words_count_thresholds = []
+		#beginning scanning file content
+		increased_words_count_list = self.process_error_words_by_settings(target_file_list, monitor_words_list, start_line_number, end_line_number)
+		print increased_words_count_list	
 		for index in range(0, len(monitor_words_list)):
 			word = monitor_words_list[index]
-			
-			#update by time
-			stats_interval = word_settings[word]['stats_interval']
-			start_time = word_settings[word]['start_time']
+			#use cache data
+			threshold = count_thresholds[word]
+			word_count = increased_words_count_list[index] + counts[word]				
+			start_time = start_times[word]
+			stats_interval =  stats_intervals[word]
+
+			counts[word] = word_count
 			current_time = long(time.time())
+			total_time = current_time - long(start_time)
+			title = ""
+			body = ""
+			is_error = False
+			need_freq_control = False
+			#update by count
+			print word + "," + str(word_count) + "," + str(threshold)
+			if word_count >= int(threshold) and total_time>=stats_interval:
+					
+				start_time_str = time.strftime("%Y-%m-%d_%H:%M:%S", time.localtime(start_time))
+				 
+				body =  email_subject + " " + email_content +  ' [' + word + ']' + ' threshold: ' + str(threshold) +\
+				 ' exact count:' + str(word_count) + ' from ' + start_time_str + " within statistic period " + str(total_time) + " s"
+				title = email_subject + ' [' + word + ']'
+				is_error = True
 
-			if (current_time - start_time) > stats_interval:
-				word_settings[word]['start_time'] = current_time
-				word_settings[word]['count'] = 0
+			if total_time>=stats_interval:
+				need_freq_control = True
+		
+			if need_freq_control:
+				self._freq_control.alert_control("error_words_monitor" + word, is_error, stats_interval, title, body, True, True)
 
-		#update config
-		word_setting_str = json.dumps(word_settings)
-		self.set_conf_value_dynamic("error_words_monitor",'settings',word_setting_str)
+			if  total_time >= stats_interval:
+				start_times[word] = current_time
+				counts[word] = 0
+				print word
+
+		#update cache
+		print 'update cache'
+		count_cache_str = json.dumps(counts)
+		start_time_str =  json.dumps(start_times)
+		self.set_cache_value_dynamic("error_words_monitor",'count', count_cache_str)
+		self.set_cache_value_dynamic("error_words_monitor",'start_time', start_time_str)
 		
 
 	def overtime_monitor(self, target_file_list, start_line_number, end_line_number):
@@ -247,28 +300,125 @@ class logMonitor():
 		keyword = monitor_words_list[0]
 		print keyword
 
-		log_paras = {}
+		log_paras_indice = {}
 		log_paras_type = {}
 		timestamp_unit = 's'
+		log_regx = ""
+
+		time_format = self.conf.get('user_request_monitor', 'time_format')
+		self._target_log_db_uri = self.conf.get('user_request_monitor', 'target_db_uri')
+		self._target_log_db_dbname = self.conf.get('user_request_monitor', 'db_name')
+		self._target_log_db_tablename = self.conf.get('user_request_monitor', 'table_name')
 
 		try:
-			log_paras = eval(self.conf.get('user_request_monitor', 'log_paras'))
 			log_paras_type = eval(self.conf.get('user_request_monitor', 'log_paras_type'))
 			timestamp_unit = self.conf.get('user_request_monitor', 'timestamp_unit')
 		except Exception,ex:
 			print ex
 
+		if "regx" == self._log_type or "csv" == self._log_type:
+			log_paras_indice = eval(self.conf.get('user_request_monitor', 'log_paras_indice'))
+
+		if "regx" == self._log_type:
+			log_regx = self.conf.get('user_request_monitor', 'log_regx')
+
+		#get scanning and processing settings and cached data of last scanning
+		file_index = 0
+		file_count = len(target_file_list)
+		record_count = 0
+		for file_path in target_file_list:
+			if file_index == file_count -1: 
+				record_count += self.ReadTargetRecordInFile(file_path, keyword, start_line_number, end_line_number, log_regx, log_paras_indice, log_paras_type, time_format, timestamp_unit)
+			else:
+				record_count += self.ReadTargetRecordInFile(file_path, keyword, start_line_number, 0, log_regx, log_paras_indice, log_paras_type, time_format, timestamp_unit)
+			file_index = file_index +1
+			start_line_number = 0
+
+		print 'Totally upload ' + str(record_count) + ' to db'
+
+	def error_status_monitor(self, target_file_list, start_line_number, end_line_number):
+		monitor_item = 'error_status_monitor'
+		#load config
+		monitor_words_list_str = self.conf.get(monitor_item,'monitor_words')
+		monitor_words_list = monitor_words_list_str.split(',')		
+		filter_pattern = self.conf.get(monitor_item,'filter_pattern')
+		stats_interval = long(self.conf.get(monitor_item,'stats_interval'))
+		error_status_ratio_threshold = float(self.conf.get('error_status_monitor','error_ratio_threshold'))
+		email_subject = self.conf.get(monitor_item,'email_subject')
+		email_content = self.conf.get(monitor_item,'email_content')
+		
+		start_time = 0l
+		total_error_count = 0l
+		total_query_count = 0l
+
+		#load cache
+		try:
+			start_time = long(self.cache_conf.get(monitor_item,'start_time'))			
+			total_error_count = long(self.cache_conf.get(monitor_item,'error_count'))
+			total_query_count = long(self.cache_conf.get(monitor_item,'query_count'))
+		except Exception,e:
+			print e
 		#get scanning and processing settings and cached data of last scanning
 		file_index = 0
 		file_count = len(target_file_list)
 
+		file_total_line_count = 0 
+		file_error_line_count = 0
+		total_line_count = 0
+		error_line_count = 0
 		for file_path in target_file_list:
 			if file_index == file_count -1: 
-				file_end = self.ReadTargetRecordInFile(file_path, keyword, start_line_number, end_line_number, log_paras, log_paras_type, timestamp_unit)
+				file_total_line_count, file_error_line_count = self.process_single_file_error_status(file_path, filter_pattern, monitor_words_list, start_line_number, end_line_number)
 			else:
-				file_end = self.ReadTargetRecordInFile(file_path, keyword, start_line_number, 0, log_paras, log_paras_type, timestamp_unit)
+				file_total_line_count, file_error_line_count = self.process_single_file_error_status(file_path, filter_pattern, monitor_words_list, start_line_number, 0)
+			
+			total_line_count += file_total_line_count
+			error_line_count += file_error_line_count
+
 			file_index = file_index +1
 			start_line_number = 0
+
+		
+		total_query_count += total_line_count
+		total_error_count += error_line_count
+
+		error_status_ratio = 0.0
+		if total_query_count > 0:
+			error_status_ratio = round(total_error_count*1.0/total_query_count,2)
+		
+
+		current_time = long(time.time())
+		total_time = current_time - start_time
+
+		title = ""
+		body = ""
+		need_freq_control = False
+		is_error = False
+
+		if error_status_ratio > error_status_ratio_threshold and total_time >= stats_interval:
+			error_status_alert_details =  "Totally " + str(error_status_ratio*100) + "%" + "("+ str(total_error_count) + ")"\
+			 + " queries has bad status " + monitor_words_list_str  + ", over "+ str(error_status_ratio_threshold*100) + "% " \
+			 + " in surveillance time-window " + str(stats_interval) + " s"
+			title = email_subject
+			body = email_content + " -- " +  error_status_alert_details
+			is_error = True
+			self.set_cache_value_dynamic(monitor_item,'query_count',0)
+			self.set_cache_value_dynamic(monitor_item,'error_count',0)
+			self.set_cache_value_dynamic(monitor_item,'start_time', current_time)
+		elif	total_time < stats_interval:			
+			self.set_cache_value_dynamic(monitor_item,'query_count',total_query_count)
+			self.set_cache_value_dynamic(monitor_item,'error_count', total_error_count)
+		else:
+			self.set_cache_value_dynamic(monitor_item,'query_count',0)
+			self.set_cache_value_dynamic(monitor_item,'error_count',0)
+			self.set_cache_value_dynamic(monitor_item,'start_time', current_time)
+
+
+		if total_time>=stats_interval:
+			need_freq_control = True
+		
+		if need_freq_control:
+			self._freq_control.alert_control(monitor_item, is_error, stats_interval, title, body, True, True)
 
 
 
@@ -280,11 +430,21 @@ class logMonitor():
 		else:
 			file_content = self.get_incremental_filecontent_toend(target_file_name, start_line_number)
 		
+		#load config
+		email_subject_base = self.conf.get(monitor_item,'email_subject')
+		email_content_base = self.conf.get(monitor_item,'email_content')
 		monitor_words_list = self.conf.get(monitor_item,'target_words').split(',')
 		print monitor_words_list
+		
+		title = ""
+		body = ""
+		is_error = False
+		need_freq_control = False
+
 		for word in monitor_words_list:
 			pattern = re.compile(word)
 			if file_content.find(word) != -1:
+				is_error = True
 				size = str(len(pattern.findall(file_content)))
 				print size
 				pos = file_content.find(word)
@@ -293,13 +453,16 @@ class logMonitor():
 
 				log_content = file_content[start_pos:end_pos]
 				print log_content
-				email_subject = self.conf.get(monitor_item,'email_subject')
-				email_content = self.conf.get(monitor_item,'email_content') + '  '+ ' 个数为：' + size+'\n' +log_content 				
-				thisword_email_content = '[' + word + ']' + email_content
-				thisword_email_subject = '[' + word + ']' + email_subject
-				self._mail_handler.alert_emails(thisword_email_subject,thisword_email_content)
-				self._message_handler.alert_phone_message(thisword_email_subject + " " + thisword_email_content)
+				email_subject = email_subject_base
+				email_content = email_content_base + '  '+ ' 个数为：' + size+'\n' +log_content 				
+				body = '[' + word + ']' + email_content
+				title = '[' + word + ']' + email_subject
 
+			else:
+				is_error = False
+
+			self._freq_control.alert_control(monitor_item+word, is_error, 300, title, body, True, True)
+				
 
 	def process_error_words_by_settings(self, target_files, monitor_words_list , start_line_number, end_line_number):
 		
@@ -307,7 +470,6 @@ class logMonitor():
 		for index in range(0, len(monitor_words_list)):
 			words_count_list.append(0)
 
-		end_line_number = 0
 		file_count = len(target_files)
 		file_index = 0
 
@@ -322,8 +484,6 @@ class logMonitor():
 			
 
 		return words_count_list
-
-
 
 	def process_error_words_in_single_file(self, target_file_name, monitor_words_list , start_line_number, end_line_number, words_count_last_time_list):
 		file_content = ""
@@ -342,18 +502,27 @@ class logMonitor():
 
 
 	def process_overtime_by_settings(self, monitor_item ,target_file_list, start_line_number, end_line_number,  overtime_ratio_threshold, time_threshold):
-							
+		#load config					
 		email_subject = self.conf.get(monitor_item,'email_subject')
 		email_content = self.conf.get(monitor_item,'email_content')
-		monitor_word = self.conf.get(monitor_item,'monitor_word')
-		
-		time_format = self.conf.get(monitor_item,'time_format')
-		start_time = long(self.conf.get(monitor_item,'start_time'))
+		monitor_word = self.conf.get(monitor_item,'monitor_word')		
+		time_format = self.conf.get(monitor_item,'time_format')		
 		stats_interval = long(self.conf.get(monitor_item,'stats_interval'))
-		total_overtime_count = long(self.conf.get(monitor_item,'overtime_count'))
-		total_query_count = long(self.conf.get(monitor_item,'query_count'))
 		request_time_unit = self.conf.get(monitor_item,'request_time_unit')
 		time_cost_unit = self.conf.get(monitor_item,'time_cost_unit')
+
+		#load cache
+		start_time = 0l
+		total_overtime_count = 0l
+		total_query_count = 0l
+
+		try:
+			start_time = long(self.cache_conf.get(monitor_item,'start_time'))
+			total_overtime_count = long(self.cache_conf.get(monitor_item,'overtime_count'))
+			total_query_count = long(self.cache_conf.get(monitor_item,'query_count'))
+		except Exception,e:
+			print e
+
 
 		log_stat = log_stats_for_time_module.logStat(self._log_type)
 		log_stat.SetLogFilter(["SELECT"])
@@ -371,13 +540,22 @@ class logMonitor():
 			time_cost_key = self.conf.get(monitor_item,'time_cost_key')	
 			log_stat.SetJsonLogSettings(request_time_key, time_cost_key)
 
-		
+		elif 'regx' == self._log_type:
+			log_regx =  self.conf.get(monitor_item,'log_regx')
+			request_time_index = int(self.conf.get(monitor_item,'request_time_index'))
+			time_cost_index = int(self.conf.get(monitor_item,'time_cost_index'))			
+			log_stat.SetRegxLogSettings(log_regx, time_cost_index,request_time_index)
+
+
 		file_index = 0
 		file_count = len(target_file_list)
+
 		for file in target_file_list:
 			if (file_count -1)  == file_index:
+				print file + "," + str(start_line_number)  + "," + str(end_line_number)
 				file_end = log_stat.GrepFromTxtInFileByRange(file, monitor_word, start_line_number, end_line_number)
 			else:
+				print file + "," + str(start_line_number)  + "," + str(end_line_number)
 				file_end = log_stat.GrepFromTxtInFileByRange(file, monitor_word, start_line_number, 0)
 
 			start_line_number = 0
@@ -387,29 +565,89 @@ class logMonitor():
 		query_count = log_stat.GetRequestCount()
 		total_overtime_count += over_time_query_count
 		total_query_count += query_count
-		total_overtime_ratio = round(total_overtime_count*1.0/total_query_count, 2)
+		total_overtime_ratio = 0.0
+		if total_query_count > 0:
+			total_overtime_ratio = round(total_overtime_count*1.0/total_query_count, 2)
+
 		print "over_time_query_count:" + str(over_time_query_count)
 		print "total_overtime_ratio:" + str(total_overtime_ratio)
 
 		current_time = long(time.time())
 		total_time = current_time - start_time
+
+		title = ""
+		body = ""
+		is_error = False
+		need_freq_control = False
+
+		if total_time >= stats_interval:
+			need_freq_control = True
 				
 		if total_overtime_ratio > overtime_ratio_threshold and total_time >= stats_interval:
-			over_time_details =  "Totally " + str(total_overtime_ratio*100) + "%" + "("+ str(total_overtime_count) + ")" + " queries exceed time threshold " + str(time_threshold) + " ms in surveillance inerval " + str(stats_interval) + " s"
-			email_content = email_content + " --- " +  over_time_details
-			self._mail_handler.alert_emails(email_subject,email_content)
-			self._message_handler.alert_phone_message(email_subject +" " + email_content)
-			self.set_conf_value_dynamic(monitor_item,'query_count',0)
-			self.set_conf_value_dynamic(monitor_item,'overtime_count',0)
-			self.set_conf_value_dynamic(monitor_item,'start_time', current_time)
-		elif	total_time < stats_interval:			
-			self.set_conf_value_dynamic(monitor_item,'query_count',total_query_count)
-			self.set_conf_value_dynamic(monitor_item,'overtime_count', total_overtime_count)
-		else:
-			self.set_conf_value_dynamic(monitor_item,'query_count',0)
-			self.set_conf_value_dynamic(monitor_item,'overtime_count',0)
-			self.set_conf_value_dynamic(monitor_item,'start_time', current_time)
+			over_time_details =  "Totally " + str(total_overtime_ratio*100) + "%" + "("+ str(total_overtime_count) + ")"\
+			 + " queries exceed " + str(time_threshold) + " ms, " + "over "+ str(overtime_ratio_threshold*100) + "% " \
+			 + " in surveillance time-window " + str(stats_interval) + " s"
 
+			body = email_content + " --- " +  over_time_details
+			title = email_subject
+			is_error = True
+
+			self.set_cache_value_dynamic(monitor_item,'query_count',0)
+			self.set_cache_value_dynamic(monitor_item,'overtime_count',0)
+			self.set_cache_value_dynamic(monitor_item,'start_time', current_time)
+		elif	total_time < stats_interval:			
+			self.set_cache_value_dynamic(monitor_item,'query_count',total_query_count)
+			self.set_cache_value_dynamic(monitor_item,'overtime_count', total_overtime_count)
+		else:
+			self.set_cache_value_dynamic(monitor_item,'query_count',0)
+			self.set_cache_value_dynamic(monitor_item,'overtime_count',0)
+			self.set_cache_value_dynamic(monitor_item,'start_time', current_time)
+
+		if need_freq_control:
+			self._freq_control.alert_control(monitor_item, is_error, stats_interval, title, body, True, True)
+
+	def process_single_file_error_status(self, filepath, keyword, error_code_patterns, start_line_number, end_line_number):
+		print 'process_single_file_error_status'
+		line_index = 0
+		curfile = open(filepath)
+		total_line_count = 0
+		error_line_count = 0
+		try:
+			print "finding %s..." %(curfile)
+			for line in curfile.readlines():
+				line_index = line_index+1
+				if line_index == end_line_number +1 and end_line_number > 0:
+					break
+				if line_index <= start_line_number:
+					continue
+
+				if keyword not in line:
+					continue
+
+				total_line_count = total_line_count + 1
+				if self.match_multiple_world(error_code_patterns,line):
+					error_line_count = error_line_count + 1
+
+			print "process " + filepath + " end in line " + str(line_index)
+			curfile.close()
+
+		except Exception,ex:
+			print Exception,":",ex
+			self.record_error_message('process_single_file_error_status catch exception: ' + str(ex))
+			
+		finally:
+			curfile.close()
+
+		return (total_line_count, error_line_count)
+
+	def match_multiple_world(self, words, line):
+		hit = False
+		for word in words:
+			if word in line:
+				hit = True
+				break
+
+		return hit
 
 	def get_incremental_filecontent_toend(self, target_file_name, start_line_number):
 		last_total = start_line_number
@@ -433,10 +671,20 @@ class logMonitor():
 		new_file_list = []
 
 		start_line_number=0
-		last_processed_file_name = self.conf.get(section_name, 'last_file')
-		last_processed_line_count = int(self.conf.get(section_name, 'lines'))
+		last_processed_file_name = ""
+		last_processed_line_count = 0
+
+		try:
+			last_processed_file_name = self.cache_conf.get(section_name, 'last_file')
+		except Exception,ex:
+			print Exception,":",ex
+		try:
+			last_processed_line_count = int(self.cache_conf.get(section_name, 'lines'))
+		except Exception,ex:
+			print Exception,":",ex
+				
+		print "last_processed_file_name: " + last_processed_file_name + " from line:" + str(last_processed_line_count)
 		
-		print "last_processed_file_name: " + last_processed_file_name
 		if last_processed_file_name in file_list:
 			hit_last_processed_file=False
 			for index in range(0, len(file_list)):
@@ -458,7 +706,7 @@ class logMonitor():
 					new_file_list.append(file_name)
 		else:
 			new_file_list = file_list
-				
+			
 		return (new_file_list, start_line_number)
 
 	def get_file_length(self, filepath):
@@ -467,12 +715,12 @@ class logMonitor():
 		return total_line_count
 
 
-	def ReadTargetRecordInFile(self, filepath, keyword, start_line_number, end_line_number, log_paras, log_paras_type, timestamp_unit):
+	def ReadTargetRecordInFile(self, filepath, keyword, start_line_number, end_line_number, log_regx, log_paras_indice, log_paras_type, time_format,timestamp_unit):
 		print 'ReadTargetRecordInFile'
 		line_index = 0
 		selected_lines = []
 		curfile = open(filepath)
-
+		total_record_lines_count = 0
 		try:
 			print "finding %s..." %(curfile)
 			for line in curfile.readlines():
@@ -485,12 +733,16 @@ class logMonitor():
 					continue
 
 				if 'json' == self._log_type:
-					json_str = self.CreateJsonFromJsonLog(line, keyword, log_paras_type, timestamp_unit)
+					json_str = self.CreateJsonFromJsonLog(line, keyword, log_paras_type, time_format, timestamp_unit)
 					selected_lines.append(json_str)
 				elif 'csv' == self._log_type:
-					json_str = self.CreateJsonFromCSVLog(line, keyword, log_paras, log_paras_type, timestamp_unit)
+					json_str = self.CreateJsonFromCSVLog(line, log_paras_indice, log_paras_type, time_format, timestamp_unit)
 					selected_lines.append(json_str)
-							
+				elif 'regx' == self._log_type:
+					json_str = self.CreateJsonFromRegxLog(line, log_regx, log_paras_indice, log_paras_type, time_format, timestamp_unit)
+					selected_lines.append(json_str)	
+
+				total_record_lines_count += 1
 
 			print "process " + filepath + " end in line " + str(line_index)
 			curfile.close()
@@ -504,9 +756,9 @@ class logMonitor():
 
 		
 		self.insert_db(selected_lines)
-		return line_index
+		return total_record_lines_count
 
-	def CreateJsonFromJsonLog(self,line,keyword, log_paras_type, timestamp_unit):
+	def CreateJsonFromJsonLog(self,line,keyword, log_paras_type, time_format,timestamp_unit):
 		json_str = '{}'
 		rate = 1
 		if timestamp_unit == 'ms':
@@ -532,16 +784,14 @@ class logMonitor():
 		return json_str
 #[2016-09-21 22:48:29](7)(Thread: 0x00007f0b4afd5700): [audience_service::user2audience][COMMA],1474469309,2016-09-21 22:48:29,127.0.0.1,59020,127.0.0.1,/bigdata/audience_service/v0/user2audience?uid=31883222,31883222,,,56
 #prefix,reqStartTime,reqStartTimeStrdirect_client_host,direct_client_port,real_client_host,server_mark,request_uri,uid,devide_id,device_type,response_time
-	def CreateJsonFromCSVLog(self,line,keyword, log_paras, log_paras_type, timestamp_unit):
+	def CreateJsonFromCSVLog(self, line, log_paras, log_paras_type, time_format,timestamp_unit):
 		
 		rate = 1
 		if timestamp_unit == 'ms':
 			rate = 1000
 		json_str = '{}'
 		response_results = re.split('[,\n]', line)
-		print log_paras
-		print log_paras_type
-		print response_results
+
 		json_obj = {}
 		for key in log_paras.keys():
 			if "string" == log_paras_type[key]:
@@ -557,17 +807,60 @@ class logMonitor():
 				json_obj[key] = long(response_results[log_paras[key]])
 		
 		json_str = json.dumps(json_obj)
+		return json_str	
+
+	def CreateJsonFromRegxLog(self, line, log_regx, log_paras_indice, log_paras_type, time_format, timestamp_unit):
+		print 'CreateJsonFromRegxLog'
+		rate = 1
+		if timestamp_unit == 'ms':
+			rate = 1000
+		json_str = '{}'
+
+		p = re.compile(log_regx)
+		regx_matched = p.match(line)
+		print regx_matched
+		response_results = regx_matched.groups()
+
+		print log_paras_indice
+		print log_paras_type
+		print response_results
+
+		json_obj = {}
+		for key in log_paras_indice.keys():
+			if "string" == log_paras_type[key]:
+				json_obj[key] = response_results[log_paras_indice[key]]
+			if "int" == log_paras_type[key]:
+				json_obj[key] = int(response_results[log_paras_indice[key]])
+			if "long" == log_paras_type[key]:
+				json_obj[key] = long(response_results[log_paras_indice[key]])
+			if "datetime" ==  log_paras_type[key]:
+				time_number_in_seconds = 0l
+				if time_format!='number':
+					time_number_in_seconds = time.mktime(time.strptime(response_results[log_paras_indice[key]], time_format))
+				else:
+					time_number_in_seconds = long(response_results[log_paras_indice[key]])/rate
+				es_date = datetime.datetime.fromtimestamp(time_number_in_seconds)
+				json_obj["datetime"] = es_date.isoformat()
+				json_obj[key] = time_number_in_seconds
+		
+		json_str = json.dumps(json_obj)
+		print json_str
 		return json_str				
 
 	def insert_db(self, doc_lines):
-		es_uri = "http://10.183.222.192:9200/letv_matrix_web_log/letv_matrix_web_user_request_record"
-		for doc_line in doc_lines:
-			if '{}' == doc_line:
-				continue
-			request = urllib2.Request(es_uri, doc_line)
-			#request.add_header('Content-Type', 'application/json')
-			#request.get_method = lambda:'PUT'           # 设置HTTP的访问方式
-			request = urllib2.urlopen(request)
+		es_hosts = self._target_log_db_uri.split(',')
+		es = Elasticsearch(es_hosts)
+		actions = []
+		current_date_str = time.strftime("%Y-%m-%d", time.localtime(time.time())) 
+		type_name = self._target_log_db_tablename + "_" +current_date_str
+		for doc in doc_lines:
+			action = {}
+			action['_index'] = self._target_log_db_dbname
+			action['_type'] = type_name
+			action['_source'] = doc
+			actions.append(action)
+
+		helpers.bulk(es, actions) 
 
 
 	def get_file_list(self):
@@ -578,10 +871,12 @@ class logMonitor():
 		return file_list[0:len(file_list) - 1]
 
 
-	def set_conf_value_dynamic(self,section,section_para_name, section_para_value):
-		cfd = open(self._config_path,'w')
-		self.conf.set(section, section_para_name, section_para_value)
-		self.conf.write(cfd)
+	def set_cache_value_dynamic(self,section,section_para_name, section_para_value):
+		cfd = open(self._cache_path, 'w')
+		if section not in self.cache_conf.sections():
+			self.cache_conf.add_section(section)
+		self.cache_conf.set(section, section_para_name, section_para_value)
+		self.cache_conf.write(cfd)
 		cfd.close()
 
 	def send_curl_command(self,url):
@@ -620,7 +915,7 @@ import getopt
 def PrintHelp():
 	print "-r/--directory= <target log folder path>"
 	print "-c/--config= <config.ini> "
-
+	print "--key= <monitor instance key, to identify different monitor process running in same machine> "
 
 if __name__ == '__main__':
 
@@ -630,13 +925,14 @@ if __name__ == '__main__':
 		exit(0)
 
 	shortargs = 'c:r:1'
-	longargs = ['directory=', 'config=']
+	longargs = ['directory=', 'config=', 'key=']
 	opts, args = getopt.getopt(sys.argv[1:], shortargs, longargs)   
-	print opts
-	print args
+
 
 	config_path =''
+	cache_path = ''
 	target_log_path = ''
+	key = 'default'
 
 	for opt, value in opts:
 		if '-c' == opt:
@@ -647,11 +943,14 @@ if __name__ == '__main__':
 			config_path = value
 		if '--directory' == opt:
 			target_log_path = value
+		if '--key' == opt:
+			key = value
 
 	print "config_path: " + config_path
 	print "target_log_path: " + target_log_path
+	print "key: " + key
 
 	logMonitor.config_path=config_path
 	logMonitor.target_log_path=target_log_path
-	lm = logMonitor(config_path,target_log_path )	
+	lm = logMonitor(config_path, cache_path, target_log_path, key )	
 	lm.task_portal()

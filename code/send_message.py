@@ -32,9 +32,10 @@ class sendMessage():
 
 	def alert_phone_message(self, content):
 		#记录报警时间
-		check_time = time.strftime("%Y-%m-%d_%H:%M:%S", time.localtime(time.time())) + '---'
+
+		check_time = time.strftime("%Y-%m-%d_%H:%M:%S", time.localtime(time.time()))
 		ip = self.get_host()
-		content =ip + "-" + check_time + content
+		content =ip + '-' + content + '-' + check_time
 		
 		request_uri = 'phone='+ self._phone_numbers +'&msg='+content
 		request_uri_encode = 'phone='+ urllib.quote(self._phone_numbers.encode('utf-8'))+'&msg='+ urllib.quote(content.encode('utf-8'))
@@ -52,4 +53,15 @@ class sendMessage():
 		ip = socketIpPort[0]
 		skt.close()
 		return ip
+
+if __name__ == '__main__':
+	
+	if len(sys.argv)<3:
+		print "cmd <phone_list>  <message_body>"
+		exit(1)
+
+	a = sendMessage(sys.argv[1])
+
+	a.set_server('http://sms.bops.live/index.php')
+	a.alert_phone_message(sys.argv[2])
 
