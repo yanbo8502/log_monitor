@@ -1,3 +1,6 @@
+project description:
+TBD
+
 usage examples:
 #log stats:
 cd [path of stats script]
