@@ -29,7 +29,7 @@ def PrintHelp():
     print "-c/--log_conf= <log config file path>,  for complicated-format requiring regx to parse, or some csv-format logs, some settings is not convenient to input by command line"
     print "--time_format= <date time format, for time parsing>, default is %Y-%m-%d %H:%M:%S, use \'number\' for decimal timestamp like 14569793275"
     print "--time_cost_unit= <unit for response time number>, \'ms\' or \'s\' default is \'ms\' "
-    print "--record_time_unit= <unit for log time stamp>, \'ms\' or \'s\' default is \'s\', python time methon default is \'s\' "
+    print "--request_time_unit	= <unit for log time stamp>, \'ms\' or \'s\' default is \'s\', python time methon default is \'s\' "
     print "--request_time_index= <index number  for splitted array of one log line>,  0,1,2 ~, used for comma-delimited log, value index of request log time stamp "
     print "--time_cost_index= <index number for splitted array of one log line >,  0,1,2 ~, used for comma-delimited log, value index of response time cost "
     print "--request_time_key= <json key name>,  used for json log, value key of request log time stamp "
@@ -46,7 +46,7 @@ if __name__=="__main__":
     shortargs = 'c:f:r:k:t:1'
     longargs = ['directory=', 'keyword=', 'time_threshold=', "pattern=", 
     "log_type=", 'print', 'time_pattern=', 'time_format=', 'log_conf=', 
-    'request_time_index=', 'time_cost_index=', 'time_cost_unit=', 'record_time_unit=',
+    'request_time_index=', 'time_cost_index=', 'time_cost_unit=', 'request_time_unit	=',
     'request_time_key=', 'time_cost_key=']
     opts, args = getopt.getopt(sys.argv[1:], shortargs, longargs)   
     print opts
@@ -64,7 +64,7 @@ if __name__=="__main__":
     time_cost_index = -1
     request_time_index = -1
     time_cost_unit='ms'
-    record_time_unit='s'
+    request_time_unit	='s'
     request_time_key = ""
     time_cost_key = ""
 
@@ -105,8 +105,8 @@ if __name__=="__main__":
             request_time_index = int(value)
         if '--time_cost_unit'==opt:
             time_cost_unit = value
-        if '--record_time_unit'==opt:
-            record_time_unit = value
+        if '--request_time_unit	'==opt:
+            request_time_unit	 = value
         if '--time_cost_key' == opt:
             time_cost_key = value
         if '--request_time_key' == opt:
@@ -126,7 +126,7 @@ if __name__=="__main__":
     print "time_cost_key: " + str(time_cost_key)
     print "request_time_key: " + str(request_time_key)
     print "time_cost_unit: " + str(time_cost_unit)
-    print "record_time_unit: " + str(record_time_unit)
+    print "request_time_unit	: " + str(request_time_unit	)
 
     if mode == '' or log_type == '' or filepath == '':
         print 'missing necessary arguments.'
@@ -169,7 +169,7 @@ if __name__=="__main__":
                 print str(e) 
 
         try:
-            record_time_unit = conf.get("basic",'record_time_unit')
+            request_time_unit	 = conf.get("basic",'request_time_unit	')
         except Exception,e:
                 print str(e)
 
@@ -210,7 +210,7 @@ if __name__=="__main__":
         log_stat.SetJsonLogSettings(request_time_key,time_cost_key)
 
     log_stat.SetTimeFormat(time_format)
-    log_stat.SetLogRecordTimeSettings(record_time_unit, time_cost_unit)
+    log_stat.SetLogRecordTimeSettings(request_time_unit	, time_cost_unit)
 
     if overtime_threshold > 0:
         log_stat.SetOverTimeThreshold(overtime_threshold)

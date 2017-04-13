@@ -48,6 +48,7 @@ class logMonitor():
 	_target_log_db_dbname = ""
 	_target_log_db_tablename = ""
 	_instance_key = "default"
+	_log_rotate = True
 
 	def __init__(self, config_path, cache_path, target_log_path, instance_key):
 		self._config_path = config_path
@@ -309,6 +310,10 @@ class logMonitor():
 		self._target_log_db_uri = self.conf.get('user_request_monitor', 'target_db_uri')
 		self._target_log_db_dbname = self.conf.get('user_request_monitor', 'db_name')
 		self._target_log_db_tablename = self.conf.get('user_request_monitor', 'table_name')
+		try:
+			self._log_rotate = self.conf.get('user_request_monitor', 'log_daily_rotate') == 'true'
+		except Exception,ex:
+			print ex 
 
 		try:
 			log_paras_type = eval(self.conf.get('user_request_monitor', 'log_paras_type'))
@@ -771,7 +776,6 @@ class logMonitor():
 				end_pos = line.rfind("}")
 				if start_pos > 0 and end_pos > start_pos:
 					json_str = line[start_pos : end_pos +1]
-					print json_str
 					for key in log_paras_type.keys():
 						if "datetime" == log_paras_type[key]:		
 							json_obj = json.loads(json_str)
@@ -852,7 +856,11 @@ class logMonitor():
 		es = Elasticsearch(es_hosts)
 		actions = []
 		current_date_str = time.strftime("%Y-%m-%d", time.localtime(time.time())) 
-		type_name = self._target_log_db_tablename + "_" +current_date_str
+
+		type_name = self._target_log_db_tablename
+		if self._log_rotate:
+			type_name = self._target_log_db_tablename + "_" +current_date_str
+
 		for doc in doc_lines:
 			action = {}
 			action['_index'] = self._target_log_db_dbname

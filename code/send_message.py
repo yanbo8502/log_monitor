@@ -30,19 +30,51 @@ class sendMessage():
 		c.perform()
 		c.close
 
+	def send_curl_get_command(self,base_url,request_uri_data):
+		request_uri_encode = urllib.urlencode(request_uri_data)
+		url =  base_url + '?' + request_uri_encode
+		print url
+		c = pycurl.Curl()
+		c.setopt(c.URL, url)
+		b = StringIO.StringIO()
+		c.setopt(pycurl.WRITEFUNCTION,b.write)
+		c.perform()
+		c.close
+
+	def send_curl_post_command(self,base_url,request_uri_data):
+
+		c = pycurl.Curl()
+		c.setopt(pycurl.VERBOSE,1)
+		c.setopt(pycurl.FOLLOWLOCATION, 1)
+		c.setopt(pycurl.MAXREDIRS, 5)
+		#crl.setopt(pycurl.AUTOREFERER,1)
+		c.setopt(pycurl.CONNECTTIMEOUT, 60)
+		c.setopt(pycurl.TIMEOUT, 300)
+		#crl.setopt(pycurl.PROXY,proxy)
+		c.setopt(pycurl.HTTPPROXYTUNNEL,1)
+		#crl.setopt(pycurl.NOSIGNAL, 1)
+		c.setopt(pycurl.USERAGENT, "sendmail.py")
+		# Option -d/--data <data>  HTTP POST data
+		c.setopt(c.POSTFIELDS, urllib.urlencode(request_uri_data))
+		#c.setopt(c.POSTFIELDS, "to=yanbo@le.com&title=123&html=456")
+		c.setopt(c.URL, base_url)
+		b = StringIO.StringIO()
+		c.setopt(pycurl.WRITEFUNCTION,b.write)
+		c.perform()
+		c.close
+
 	def alert_phone_message(self, content):
 		#记录报警时间
 
 		check_time = time.strftime("%Y-%m-%d_%H:%M:%S", time.localtime(time.time()))
 		ip = self.get_host()
 		content =ip + '-' + content + '-' + check_time
-		
-		request_uri = 'phone='+ self._phone_numbers +'&msg='+content
-		request_uri_encode = 'phone='+ urllib.quote(self._phone_numbers.encode('utf-8'))+'&msg='+ urllib.quote(content.encode('utf-8'))
-		cmd_email = self._http_api + '?' + request_uri
-		cmd_email_encode = self._http_api + '?' + request_uri_encode
-		print cmd_email
-		self.send_curl_command(cmd_email_encode)
+
+		request_uri_data = {}
+ 		request_uri_data["phone"] = self._phone_numbers 
+		request_uri_data["msg"] = content		
+
+		self.send_curl_get_command(self._http_api, request_uri_data)
 
 	def get_host(self):
 		skt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

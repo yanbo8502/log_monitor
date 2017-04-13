@@ -43,7 +43,7 @@ class logStat():
     _comma_log_response_time_cost_index = 0
     _comma_log_request_time_index = 0
     _timestamp_format = '%Y-%m-%d %H:%M:%S'
-    _record_time_unit = 'ms'
+    _request_time_unit	 = 'ms'
     _time_cost_unit = 'ms'
     _json_time_cost_key = ""
     _json_request_time_key = ""
@@ -51,9 +51,9 @@ class logStat():
     def __init__(self, log_mode):
         self._log_mode = log_mode
 
-    def SetLogRecordTimeSettings(self, record_time_unit, time_cost_unit):
-        if ''!=record_time_unit:
-            self._record_time_unit = record_time_unit
+    def SetLogRecordTimeSettings(self, request_time_unit	, time_cost_unit):
+        if ''!=request_time_unit	:
+            self._request_time_unit	 = request_time_unit	
         if ''!=time_cost_unit:
             self._time_cost_unit = time_cost_unit
 
@@ -151,7 +151,7 @@ class logStat():
     def ExtractDateTimeFromRegxLog(self, line):
         print "ExtractDateTimeFromRegxLog"
         time_rate = 1
-        if 'ms' == self._record_time_unit:
+        if 'ms' == self._request_time_unit	:
             time_rate = 1000
 
         time_value = 0l
@@ -178,7 +178,7 @@ class logStat():
         print "ExtractDateTimeFromCSVLog"
 
         time_rate = 1
-        if 'ms' == self._record_time_unit:
+        if 'ms' == self._request_time_unit	:
             time_rate = 1000
 
         response_results = re.split('[,\n]', line)
@@ -197,7 +197,7 @@ class logStat():
         #performance line format is  {"xxx":"xxxx", ..., "reqProcTime":123,....}
         request_time = -1
         time_rate = 1
-        if 'ms' == self._record_time_unit:
+        if 'ms' == self._request_time_unit	:
             time_rate = 1000
 
         start_pos = line.find("{")
@@ -358,15 +358,14 @@ class logStat():
         filelist = os.listdir(folderpath)
         print filelist
         for file in filelist:
-            if ".log" in file:
-                self.GrepFromTxtInFile(folderpath + "//" + file, keyword)
+            self.GrepFromTxtInFile(folderpath + "//" + file, keyword)
 
 
     def GrepFromTxtInFolderByPattern(self, folderpath, pattern, keyword):
         filelist = os.listdir(folderpath)
         matched_file_list = []        
         for file in filelist:
-            if ".log" in file and pattern in file:
+            if pattern in file:
                 matched_file_list.append(folderpath + "//" + file)
         
         self.GrepFromTxtInFiles(matched_file_list, keyword)
@@ -374,8 +373,7 @@ class logStat():
     def GrepFromTxtInFiles(self, filelist, keyword):
         print filelist
         for file in filelist:
-            if ".log" in file:
-                self.GrepFromTxtInFile(file, keyword)
+            self.GrepFromTxtInFile(file, keyword)
 
     def StatsByTimeRanges(self):
         stats_part_count = len(self.value_stats_thresholds)
@@ -420,7 +418,7 @@ class logStat():
 
     def PrintSummaryStats(self):
         time_rate = 1
-        if 'ms' == self._record_time_unit:
+        if 'ms' == self._request_time_unit	:
             time_rate = 1000
 
         

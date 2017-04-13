@@ -26,7 +26,40 @@ class sendMail():
 		c.setopt(c.URL, url)
 		b = StringIO.StringIO()
 		c.setopt(pycurl.WRITEFUNCTION,b.write)
-		#c.perform()
+		c.perform()
+		c.close
+
+	def send_curl_get_command(self,base_url,request_uri_data):
+		request_uri_encode = urllib.urlencode(request_uri_data)
+		url =  base_url + '?' + request_uri_encode
+		print url
+		c = pycurl.Curl()
+		c.setopt(c.URL, url)
+		b = StringIO.StringIO()
+		c.setopt(pycurl.WRITEFUNCTION,b.write)
+		c.perform()
+		c.close
+
+	def send_curl_post_command(self,base_url,request_uri_data):
+
+		c = pycurl.Curl()
+		c.setopt(pycurl.VERBOSE,1)
+		c.setopt(pycurl.FOLLOWLOCATION, 1)
+		c.setopt(pycurl.MAXREDIRS, 5)
+		#crl.setopt(pycurl.AUTOREFERER,1)
+		c.setopt(pycurl.CONNECTTIMEOUT, 60)
+		c.setopt(pycurl.TIMEOUT, 300)
+		#crl.setopt(pycurl.PROXY,proxy)
+		c.setopt(pycurl.HTTPPROXYTUNNEL,1)
+		#crl.setopt(pycurl.NOSIGNAL, 1)
+		c.setopt(pycurl.USERAGENT, "sendmail.py")
+		# Option -d/--data <data>  HTTP POST data
+		c.setopt(c.POSTFIELDS, urllib.urlencode(request_uri_data))
+		#c.setopt(c.POSTFIELDS, "to=yanbo@le.com&title=123&html=456")
+		c.setopt(c.URL, base_url)
+		b = StringIO.StringIO()
+		c.setopt(pycurl.WRITEFUNCTION,b.write)
+		c.perform()
 		c.close
 
 	def alert_emails(self,email_subject,email_content):
@@ -35,13 +68,12 @@ class sendMail():
 		ip = self.get_host()
 		email_subject =  email_subject  + "-" + ip 
 		email_content = check_time + email_content
- 
-		request_uri = 'sendto='+ self._mail_adresses +'&subject='+email_subject+'&body=' + email_content
-		request_uri_encode = 'sendto='+ urllib.quote(self._mail_adresses.encode('utf-8'))+'&subject='+ urllib.quote(email_subject.encode('utf-8'))+'&body=' + urllib.quote(email_content.encode('utf-8')) 
-		cmd_email = self._http_api + '?' + request_uri
-		cmd_email_encode = self._http_api + '?' + request_uri_encode
-		
-		self.send_curl_command(cmd_email_encode)
+		request_uri_data = {}
+ 		request_uri_data["to"] = self._mail_adresses 
+		request_uri_data["title"] = email_subject
+		request_uri_data["html"] = email_content
+
+		self.send_curl_post_command(self._http_api, request_uri_data)
 
 	def get_host(self):
 		skt = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -73,6 +105,6 @@ if __name__ == '__main__':
 
 	a = sendMail(sys.argv[1])
 
-	a.set_server('http://mailapi.vxlan.net/mail.php')
+	a.set_server('http://10.180.92.210:9110/bigdata/common_service/v0/send_mail')
 	a.alert_emails(sys.argv[2],sys.argv[3])
 
