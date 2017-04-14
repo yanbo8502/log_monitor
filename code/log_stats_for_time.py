@@ -239,7 +239,7 @@ if __name__=="__main__":
     duration = end_time - start_time
 
     print "time cost:"
-    print duration
+    print str(duration) + " s"
     
     if overtime_threshold > 0:
         print '在处理范围内，超时的请求个数为' + str(log_stat.GetOvertimeCount())
